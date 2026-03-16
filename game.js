@@ -1,37 +1,51 @@
 //Inheritance (Part 1)
 //Every game object has a position and type
+//Dead flag, width, height, img, and draw() method (Part 3)
 class GameObject {
-    constructor(x, y, type) {
-        this.x = x;
-        this.y = y;
-        this.type = type;
-    }
-}
-
-//Adds the ability to move
-class Movable extends GameObject {
-    constructor(x, y, type) {
-        super(x, y, type); //Call parent constructor
-    }
-
-    //Move the object to a new position
-    moveTo(x, y) {
-        this.x = x;
-        this.y = y;
-    }
-}
-
-//Hero is a Movable object (It can move around the screen)
-class Hero extends Movable {
     constructor(x, y) {
-        super(x, y, 'Hero'); //Type is automatically set to Hero
+        this.x = x;
+        this.y = y;
+        this.dead = false;   //Tracks if object should be removed
+        this.type = "";
+        this.width = 0;
+        this.height = 0;
+        this.img = undefined;
+    }
+
+    //Every game object can draw itself to the canvas
+    draw(ctx) {
+        ctx.drawImage(this.img, this.x, this.y, this.width, this.height);
     }
 }
 
-//No movement capability
+//GameObject that the player controls (Hero)
+class Hero extends GameObject {
+    constructor(x, y) {
+        super(x, y);
+        this.width = 98;
+        this.height = 75;
+        this.type = "Hero";
+        this.speed = 5;
+    }
+}
+
+//GameObject that automatically moves down the screen (Enemy)
 class Enemy extends GameObject {
     constructor(x, y) {
-        super(x, y, 'Enemy');
+        super(x, y);
+        this.width = 98;
+        this.height = 50;
+        this.type = "Enemy";
+
+        //Moves enemy down and stops when it reaches the bottom of the canvas
+        const id = setInterval(() => {
+            if (this.y < canvas.height - this.height) {
+                this.y += 5; //Move down by 5 pixels
+            } else {
+                console.log('Stopped at', this.y);
+                clearInterval(id); //Stop moving at bottom
+            }
+        }, 300);
     }
 }
 
@@ -60,18 +74,26 @@ class EventEmitter {
     }
 }
 
-//Define message types as constants to avoid typos
+//Messages and global vars
+//Updates messages to use KEY_EVENT naming (Part 3)
 const Messages = {
-    HERO_MOVE_LEFT: 'HERO_MOVE_LEFT',
-    HERO_MOVE_RIGHT: 'HERO_MOVE_RIGHT',
-    HERO_MOVE_UP: 'HERO_MOVE_UP',
-    HERO_MOVE_DOWN: 'HERO_MOVE_DOWN',
-    ENEMY_SPOTTED: 'ENEMY_SPOTTED'
+    KEY_EVENT_UP: "KEY_EVENT_UP",
+    KEY_EVENT_DOWN: "KEY_EVENT_DOWN",
+    KEY_EVENT_LEFT: "KEY_EVENT_LEFT",
+    KEY_EVENT_RIGHT: "KEY_EVENT_RIGHT",
 };
+
+//Global variables (accessible throughout the game)
+let heroImg,
+    enemyImg,
+    canvas, ctx,
+    gameObjects = [], //Stores all active game objects
+    hero,
+    eventEmitter = new EventEmitter();
 
 //Image loading (Part 2)
 //Loads an image from a path and returns a Promise
-function loadAsset(path) {
+function loadTexture(path) {
     return new Promise((resolve, reject) => {
         const img = new Image();
         img.src = path;
@@ -84,105 +106,117 @@ function loadAsset(path) {
     });
 }
 
-//Enemy formation (Part 2)
-//Constants to control enemy spacing and formation size
-const ENEMY_TOTAL = 5;
-const ENEMY_SPACING = 98;
-const FORMATION_WIDTH = ENEMY_TOTAL * ENEMY_SPACING;
+//Keyboard input (Part 3)
+//Prevent default browser behaviour for arrow keys and spacebar (no bar scrolling)
+const onKeyDown = function (e) {
+    console.log(e.keyCode);
+    switch (e.keyCode) {
+        case 37: //Arrow left
+        case 39: //Arrow right
+        case 38: //Arrow up
+        case 40: //Arrow down
+        case 32: //Spacebar
+            e.preventDefault();
+            break;
+        default:
+            break;
+    }
+};
 
-//Draws a 5x5 grid of enemy ships on the canvas
-function createEnemies(ctx, canvas, enemyImg) {
-    const START_X = (canvas.width - FORMATION_WIDTH) / 2; //Center the formation
-    const STOP_X = START_X + FORMATION_WIDTH;
+window.addEventListener("keydown", onKeyDown);
+
+//Pub/sub keyboard events
+//Detects key releases and emits the corresponding message
+window.addEventListener("keyup", (evt) => {
+    if (evt.key === "ArrowUp") {
+        eventEmitter.emit(Messages.KEY_EVENT_UP);
+    } else if (evt.key === "ArrowDown") {
+        eventEmitter.emit(Messages.KEY_EVENT_DOWN);
+    } else if (evt.key === "ArrowLeft") {
+        eventEmitter.emit(Messages.KEY_EVENT_LEFT);
+    } else if (evt.key === "ArrowRight") {
+        eventEmitter.emit(Messages.KEY_EVENT_RIGHT);
+    }
+});
+
+//Game object creation (Part 3)
+//Creates 5x5 enemy formation and adds them to gameObjects array
+function createEnemies() {
+    const MONSTER_TOTAL = 5;
+    const MONSTER_WIDTH = MONSTER_TOTAL * 98;
+    const START_X = (canvas.width - MONSTER_WIDTH) / 2; //Center formation
+    const STOP_X = START_X + MONSTER_WIDTH;
 
     //Outer loop moves left to right
-    for (let x = START_X; x < STOP_X; x += ENEMY_SPACING) {
+    for (let x = START_X; x < STOP_X; x += 98) {
         //Inner loop moves top to bottom
         for (let y = 0; y < 50 * 5; y += 50) {
-            ctx.drawImage(enemyImg, x, y);
+            const enemy = new Enemy(x, y);
+            enemy.img = enemyImg;
+            gameObjects.push(enemy); //Add to game objects array
         }
     }
 }
 
-//Main setup
-async function initGame() {
-    try {
-        //Load both image assets before starting
-        const heroImg = await loadAsset('assets/player.png');
-        const enemyImg = await loadAsset('assets/enemyShip.png');
-
-        //Get the canvas element and 2D
-        const canvas = document.getElementById('myCanvas');
-        const ctx = canvas.getContext('2d');
-
-        //Create hero object at center bottom of canvas
-        const hero = new Hero(
-            canvas.width / 2 - 45,
-            canvas.height - canvas.height / 4
-        );
-
-        //Set up event emitter for pub/sub communication
-        const eventEmitter = new EventEmitter();
-
-        //Movement messages and update hero position
-        eventEmitter.on(Messages.HERO_MOVE_LEFT, () => {
-            hero.moveTo(hero.x - 5, hero.y);
-        });
-
-        eventEmitter.on(Messages.HERO_MOVE_RIGHT, () => {
-            hero.moveTo(hero.x + 5, hero.y);
-        });
-
-        eventEmitter.on(Messages.HERO_MOVE_UP, () => {
-            hero.moveTo(hero.x, hero.y - 5);
-        });
-
-        eventEmitter.on(Messages.HERO_MOVE_DOWN, () => {
-            hero.moveTo(hero.x, hero.y + 5);
-        });
-
-        //Keyboard input publishes messages to the event emitter
-        window.addEventListener('keydown', (event) => {
-            event.preventDefault(); //Stops browser from scrolling bar at bottom
-            switch (event.key) {
-                case 'ArrowLeft':
-                    eventEmitter.emit(Messages.HERO_MOVE_LEFT);
-                    break;
-                case 'ArrowRight':
-                    eventEmitter.emit(Messages.HERO_MOVE_RIGHT);
-                    break;
-                case 'ArrowUp':
-                    eventEmitter.emit(Messages.HERO_MOVE_UP);
-                    break;
-                case 'ArrowDown':
-                    eventEmitter.emit(Messages.HERO_MOVE_DOWN);
-                    break;
-            }
-        });
-
-        //Game loop (Clears and redraws the canvas every frame)
-        function gameLoop() {
-            //Clear screen and draw black background
-            ctx.fillStyle = 'black';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            //Draw hero at its current position
-            ctx.drawImage(heroImg, hero.x, hero.y);
-
-            //Draw the 5x5 enemy formation
-            createEnemies(ctx, canvas, enemyImg);
-
-            //Call gameLoop again on next frame
-            requestAnimationFrame(gameLoop);
-        }
-
-        //Start the game loop
-        gameLoop();
-
-    } catch (error) {
-        console.error('Failed to initialize game:', error);
-    }
+//Creates the hero and adds it to gameObjects array
+function createHero() {
+    hero = new Hero(
+        canvas.width / 2 - 45,  //Center horizontally
+        canvas.height - canvas.height / 4  //Near bottom
+    );
+    hero.img = heroImg;
+    gameObjects.push(hero); //Add to game objects array
 }
 
-//Start the game when the script loads
-initGame();
+//Draws all active game objects to the canvas
+function drawGameObjects(ctx) {
+    gameObjects.forEach(go => go.draw(ctx));
+}
+
+//Init game (Part 3)
+function initGame() {
+    gameObjects = []; //Reset game objects array
+    createEnemies();  //Create and position all enemies
+    createHero();     //Create and position the hero
+
+    //Key events and move hero accordingly
+    eventEmitter.on(Messages.KEY_EVENT_UP, () => {
+        hero.y -= 5; //Move up (decrease y)
+    });
+
+    eventEmitter.on(Messages.KEY_EVENT_DOWN, () => {
+        hero.y += 5; //Move down (increase y)
+    });
+
+    eventEmitter.on(Messages.KEY_EVENT_LEFT, () => {
+        hero.x -= 5; //Move left (decrease x)
+    });
+
+    eventEmitter.on(Messages.KEY_EVENT_RIGHT, () => {
+        hero.x += 5; //Move right (increase x)
+    });
+}
+
+//Game loop (Part 3)
+//Wait for page to fully load before starting
+window.onload = async () => {
+    //Get canvas element and 2D
+    canvas = document.getElementById("myCanvas");
+    ctx = canvas.getContext("2d");
+
+    //Load all image assets before starting game
+    heroImg = await loadTexture("assets/player.png");
+    enemyImg = await loadTexture("assets/enemyShip.png");
+
+    //Initialize game objects and event listeners
+    initGame();
+
+
+    //Clears canvas and redraws all game objects each frame
+    const gameLoopId = setInterval(() => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height); //Clear old frame
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);  //Draw background
+        drawGameObjects(ctx); //Draw all game objects
+    }, 100);
+};
