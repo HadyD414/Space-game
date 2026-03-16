@@ -31,6 +31,7 @@ class GameObject {
 
 //GameObject that the player controls (Hero)
 //Cooldown system and fire() method (Part 4)
+//Life and points tracking (Part 5)
 class Hero extends GameObject {
     constructor(x, y) {
         super(x, y);
@@ -39,6 +40,8 @@ class Hero extends GameObject {
         this.type = "Hero";
         this.speed = { x: 0, y: 0 };
         this.cooldown = 0; //0 means ready to fire
+        this.life = 3;     //Hero starts with 3 lives
+        this.points = 0;   //Hero starts with 0 points
     }
 
     //Creates a laser and starts cooldown timer
@@ -59,6 +62,19 @@ class Hero extends GameObject {
     //Returns true if hero is allowed to fire
     canFire() {
         return this.cooldown === 0;
+    }
+
+    //Reduce life by 1, mark as dead if no lives left
+    decrementLife() {
+        this.life--;
+        if (this.life === 0) {
+            this.dead = true;
+        }
+    }
+
+    //Add 100 points for each enemy destroyed
+    incrementPoints() {
+        this.points += 100;
     }
 }
 
@@ -143,9 +159,11 @@ const Messages = {
 };
 
 //Global variables (accessible throughout the game)
+//lifeImg (Part 5)
 let heroImg,
     enemyImg,
     laserImg,
+    lifeImg,
     canvas, ctx,
     gameObjects = [], //Stores all active game objects
     hero,
@@ -231,8 +249,41 @@ function updateGameObjects() {
         });
     });
 
+    //Check if any enemy collides with the hero (Part 5)
+    enemies.forEach(enemy => {
+        const heroRect = hero.rectFromGameObject();
+        if (intersectRect(heroRect, enemy.rectFromGameObject())) {
+            eventEmitter.emit(Messages.COLLISION_ENEMY_HERO, { enemy });
+        }
+    });
+
     //Remove all objects marked as dead
     gameObjects = gameObjects.filter(go => !go.dead);
+}
+
+//Draw life icons in bottom right corner (Part 5)
+function drawLife() {
+    const START_POS = canvas.width - 180;
+    for (let i = 0; i < hero.life; i++) {
+        ctx.drawImage(
+            lifeImg,
+            START_POS + (45 * (i + 1)),
+            canvas.height - 37
+        );
+    }
+}
+
+//Draw points in bottom left corner (Part 5)
+function drawPoints() {
+    ctx.font = "30px Arial";
+    ctx.fillStyle = "red";
+    ctx.textAlign = "left";
+    drawText("Points: " + hero.points, 10, canvas.height - 20);
+}
+
+//Helper function to draw text on the canvas
+function drawText(message, x, y) {
+    ctx.fillText(message, x, y);
 }
 
 //Game object creation (Part 3)
@@ -299,17 +350,24 @@ function initGame() {
         }
     });
 
-    //When laser hits enemy, mark both as dead
+    //When laser hits enemy, mark both as dead and add points
     eventEmitter.on(Messages.COLLISION_ENEMY_LASER, (_, { first, second }) => {
         first.dead = true;
         second.dead = true;
+        hero.incrementPoints(); //Add 100 points
+    });
+
+    //When enemy hits hero, enemy dies and hero loses a life
+    eventEmitter.on(Messages.COLLISION_ENEMY_HERO, (_, { enemy }) => {
+        enemy.dead = true;
+        hero.decrementLife(); //Lose a life
     });
 }
 
-//Game loop (Part 3 & 4)
+//Game loop (Part 3, 4 & 5)
 //Wait for page to fully load before starting
 window.onload = async () => {
-    //Get canvas element and 2D context
+    //Get canvas element and 2D 
     canvas = document.getElementById("myCanvas");
     ctx = canvas.getContext("2d");
 
@@ -317,6 +375,7 @@ window.onload = async () => {
     heroImg = await loadTexture("assets/player.png");
     enemyImg = await loadTexture("assets/enemyShip.png");
     laserImg = await loadTexture("assets/laserRed.png");
+    lifeImg = await loadTexture("assets/life.png"); //Part 5
 
     //Initialize game objects and event listeners
     initGame();
@@ -329,5 +388,7 @@ window.onload = async () => {
         ctx.fillRect(0, 0, canvas.width, canvas.height);  //Draw background
         updateGameObjects(); //Check collisions and remove dead objects
         drawGameObjects(ctx); //Draw all living objects
+        drawPoints();  //Show score bottom left
+        drawLife();    //Show lives bottom right
     }, 100);
 };
