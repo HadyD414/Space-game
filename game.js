@@ -1,6 +1,6 @@
 //Inheritance (Part 1)
 //Every game object has a position and type
-//dead flag, width, height, img, and draw() method (Part 3)
+//Dead flag, width, height, img, and draw() method (Part 3)
 //rectFromGameObject() for collision detection (Part 4)
 class GameObject {
     constructor(x, y) {
@@ -31,7 +31,7 @@ class GameObject {
 
 //GameObject that the player controls (Hero)
 //Cooldown system and fire() method (Part 4)
-//life and points tracking (Part 5)
+//Life and points tracking (Part 5)
 class Hero extends GameObject {
     constructor(x, y) {
         super(x, y);
@@ -403,7 +403,7 @@ function initGame() {
     createEnemies();  //Create and position all enemies
     createHero();     //Create and position the hero
 
-    //Subscribe to key events and move hero accordingly
+    //Key events and move hero accordingly
     eventEmitter.on(Messages.KEY_EVENT_UP, () => {
         hero.y -= 5; //Move up (decrease y)
     });
