@@ -1,0 +1,1 @@
+{"name":"space-game","version":"1.0.0","description":"A browser-based space shooter game","scripts":{"start":"lite-server"},"devDependencies":{"lite-server":"^2.6.1"}}
