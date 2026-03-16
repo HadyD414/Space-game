@@ -1,6 +1,7 @@
 //Inheritance (Part 1)
 //Every game object has a position and type
 //Dead flag, width, height, img, and draw() method (Part 3)
+//rectFromGameObject() for collision detection (Part 4)
 class GameObject {
     constructor(x, y) {
         this.x = x;
@@ -16,16 +17,48 @@ class GameObject {
     draw(ctx) {
         ctx.drawImage(this.img, this.x, this.y, this.width, this.height);
     }
+
+    //Returns rectangle boundaries for collision detection
+    rectFromGameObject() {
+        return {
+            top: this.y,
+            left: this.x,
+            bottom: this.y + this.height,
+            right: this.x + this.width,
+        };
+    }
 }
 
 //GameObject that the player controls (Hero)
+//Cooldown system and fire() method (Part 4)
 class Hero extends GameObject {
     constructor(x, y) {
         super(x, y);
-        this.width = 98;
+        this.width = 99;
         this.height = 75;
         this.type = "Hero";
-        this.speed = 5;
+        this.speed = { x: 0, y: 0 };
+        this.cooldown = 0; //0 means ready to fire
+    }
+
+    //Creates a laser and starts cooldown timer
+    fire() {
+        gameObjects.push(new Laser(this.x + 45, this.y - 10));
+        this.cooldown = 500; //Set cooldown to 500ms
+
+        //Count down cooldown every 200ms
+        let id = setInterval(() => {
+            if (this.cooldown > 0) {
+                this.cooldown -= 100;
+            } else {
+                clearInterval(id);
+            }
+        }, 200);
+    }
+
+    //Returns true if hero is allowed to fire
+    canFire() {
+        return this.cooldown === 0;
     }
 }
 
@@ -46,6 +79,28 @@ class Enemy extends GameObject {
                 clearInterval(id); //Stop moving at bottom
             }
         }, 300);
+    }
+}
+
+//Laser moves upward and destroys itself at top of screen (Part 4)
+class Laser extends GameObject {
+    constructor(x, y) {
+        super(x, y);
+        this.width = 9;
+        this.height = 33;
+        this.type = 'Laser';
+        this.img = laserImg;
+
+        //Move laser up every 100ms
+        //Mark as dead when it reaches the top of the screen
+        let id = setInterval(() => {
+            if (this.y > 0) {
+                this.y -= 15; //Move up
+            } else {
+                this.dead = true; //Remove when off screen
+                clearInterval(id);
+            }
+        }, 100);
     }
 }
 
@@ -76,16 +131,21 @@ class EventEmitter {
 
 //Messages and global vars
 //Updates messages to use KEY_EVENT naming (Part 3)
+//Space key, laser-enemy collision, hero-enemy collision (Part 4)
 const Messages = {
     KEY_EVENT_UP: "KEY_EVENT_UP",
     KEY_EVENT_DOWN: "KEY_EVENT_DOWN",
     KEY_EVENT_LEFT: "KEY_EVENT_LEFT",
     KEY_EVENT_RIGHT: "KEY_EVENT_RIGHT",
+    KEY_EVENT_SPACE: "KEY_EVENT_SPACE",
+    COLLISION_ENEMY_LASER: "COLLISION_ENEMY_LASER",
+    COLLISION_ENEMY_HERO: "COLLISION_ENEMY_HERO",
 };
 
 //Global variables (accessible throughout the game)
 let heroImg,
     enemyImg,
+    laserImg,
     canvas, ctx,
     gameObjects = [], //Stores all active game objects
     hero,
@@ -107,7 +167,7 @@ function loadTexture(path) {
 }
 
 //Keyboard input (Part 3)
-//Prevent default browser behaviour for arrow keys and spacebar (no bar scrolling)
+//Prevent default browser behaviour for arrow keys and spacebar
 const onKeyDown = function (e) {
     console.log(e.keyCode);
     switch (e.keyCode) {
@@ -136,8 +196,44 @@ window.addEventListener("keyup", (evt) => {
         eventEmitter.emit(Messages.KEY_EVENT_LEFT);
     } else if (evt.key === "ArrowRight") {
         eventEmitter.emit(Messages.KEY_EVENT_RIGHT);
+    } else if (evt.keyCode === 32) {
+        //Spacebar fires laser
+        eventEmitter.emit(Messages.KEY_EVENT_SPACE);
     }
 });
+
+//Collision detection (Part 4)
+//Checks if two rectangles are overlapping
+function intersectRect(r1, r2) {
+    return !(
+        r2.left > r1.right ||
+        r2.right < r1.left ||
+        r2.top > r1.bottom ||
+        r2.bottom < r1.top
+    );
+}
+
+//Updates all game objects and checks for collisions
+function updateGameObjects() {
+    const enemies = gameObjects.filter(go => go.type === 'Enemy');
+    const lasers = gameObjects.filter(go => go.type === 'Laser');
+
+    //Check every laser against every enemy for collision
+    lasers.forEach((laser) => {
+        enemies.forEach((enemy) => {
+            if (intersectRect(laser.rectFromGameObject(), enemy.rectFromGameObject())) {
+                //Emit collision event with both objects
+                eventEmitter.emit(Messages.COLLISION_ENEMY_LASER, {
+                    first: laser,
+                    second: enemy,
+                });
+            }
+        });
+    });
+
+    //Remove all objects marked as dead
+    gameObjects = gameObjects.filter(go => !go.dead);
+}
 
 //Game object creation (Part 3)
 //Creates 5x5 enemy formation and adds them to gameObjects array
@@ -173,7 +269,7 @@ function drawGameObjects(ctx) {
     gameObjects.forEach(go => go.draw(ctx));
 }
 
-//Init game (Part 3)
+//Init game (Part 3 & 4)
 function initGame() {
     gameObjects = []; //Reset game objects array
     createEnemies();  //Create and position all enemies
@@ -195,28 +291,43 @@ function initGame() {
     eventEmitter.on(Messages.KEY_EVENT_RIGHT, () => {
         hero.x += 5; //Move right (increase x)
     });
+
+    //Spacebar fires laser if cooldown allows
+    eventEmitter.on(Messages.KEY_EVENT_SPACE, () => {
+        if (hero.canFire()) {
+            hero.fire();
+        }
+    });
+
+    //When laser hits enemy, mark both as dead
+    eventEmitter.on(Messages.COLLISION_ENEMY_LASER, (_, { first, second }) => {
+        first.dead = true;
+        second.dead = true;
+    });
 }
 
-//Game loop (Part 3)
+//Game loop (Part 3 & 4)
 //Wait for page to fully load before starting
 window.onload = async () => {
-    //Get canvas element and 2D
+    //Get canvas element and 2D context
     canvas = document.getElementById("myCanvas");
     ctx = canvas.getContext("2d");
 
     //Load all image assets before starting game
     heroImg = await loadTexture("assets/player.png");
     enemyImg = await loadTexture("assets/enemyShip.png");
+    laserImg = await loadTexture("assets/laserRed.png");
 
     //Initialize game objects and event listeners
     initGame();
 
-
-    //Clears canvas and redraws all game objects each frame
+    //Game loop runs every 100ms
+    //Clears canvas, updates collisions, redraws everything
     const gameLoopId = setInterval(() => {
         ctx.clearRect(0, 0, canvas.width, canvas.height); //Clear old frame
         ctx.fillStyle = "black";
         ctx.fillRect(0, 0, canvas.width, canvas.height);  //Draw background
-        drawGameObjects(ctx); //Draw all game objects
+        updateGameObjects(); //Check collisions and remove dead objects
+        drawGameObjects(ctx); //Draw all living objects
     }, 100);
 };
