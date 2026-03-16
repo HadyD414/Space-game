@@ -1,6 +1,6 @@
 //Inheritance (Part 1)
 //Every game object has a position and type
-//Dead flag, width, height, img, and draw() method (Part 3)
+//dead flag, width, height, img, and draw() method (Part 3)
 //rectFromGameObject() for collision detection (Part 4)
 class GameObject {
     constructor(x, y) {
@@ -31,7 +31,7 @@ class GameObject {
 
 //GameObject that the player controls (Hero)
 //Cooldown system and fire() method (Part 4)
-//Life and points tracking (Part 5)
+//life and points tracking (Part 5)
 class Hero extends GameObject {
     constructor(x, y) {
         super(x, y);
@@ -143,23 +143,33 @@ class EventEmitter {
             });
         }
     }
+
+    //Clears all listeners (Resetting game)
+    clear() {
+        this.listeners = {};
+    }
 }
 
 //Messages and global vars
 //Updates messages to use KEY_EVENT naming (Part 3)
-//Space key, laser-enemy collision, hero-enemy collision (Part 4)
+//Space key, laser-enemy and hero-enemy collision (Part 4)
+//game end win/loss and enter key (Part 6)
 const Messages = {
     KEY_EVENT_UP: "KEY_EVENT_UP",
     KEY_EVENT_DOWN: "KEY_EVENT_DOWN",
     KEY_EVENT_LEFT: "KEY_EVENT_LEFT",
     KEY_EVENT_RIGHT: "KEY_EVENT_RIGHT",
     KEY_EVENT_SPACE: "KEY_EVENT_SPACE",
+    KEY_EVENT_ENTER: "KEY_EVENT_ENTER",
     COLLISION_ENEMY_LASER: "COLLISION_ENEMY_LASER",
     COLLISION_ENEMY_HERO: "COLLISION_ENEMY_HERO",
+    GAME_END_LOSS: "GAME_END_LOSS",
+    GAME_END_WIN: "GAME_END_WIN",
 };
 
 //Global variables (accessible throughout the game)
 //lifeImg (Part 5)
+//gameLoopId declared globally for reset functionality (Part 6)
 let heroImg,
     enemyImg,
     laserImg,
@@ -167,6 +177,7 @@ let heroImg,
     canvas, ctx,
     gameObjects = [], //Stores all active game objects
     hero,
+    gameLoopId, //Declared globally so resetGame() can access it
     eventEmitter = new EventEmitter();
 
 //Image loading (Part 2)
@@ -217,6 +228,9 @@ window.addEventListener("keyup", (evt) => {
     } else if (evt.keyCode === 32) {
         //Spacebar fires laser
         eventEmitter.emit(Messages.KEY_EVENT_SPACE);
+    } else if (evt.key === "Enter") {
+        //Enter key restarts the game
+        eventEmitter.emit(Messages.KEY_EVENT_ENTER);
     }
 });
 
@@ -286,6 +300,69 @@ function drawText(message, x, y) {
     ctx.fillText(message, x, y);
 }
 
+//Check if hero is out of lives (Part 6)
+function isHeroDead() {
+    return hero.life <= 0;
+}
+
+//Check if all enemies are destroyed (Part 6)
+function isEnemiesDead() {
+    const enemies = gameObjects.filter(go => go.type === "Enemy" && !go.dead);
+    return enemies.length === 0;
+}
+
+//Display win or lose message on screen (Part 6)
+function displayMessage(message, color = "red") {
+    ctx.font = "30px Arial";
+    ctx.fillStyle = color;
+    ctx.textAlign = "center";
+    ctx.fillText(message, canvas.width / 2, canvas.height / 2);
+}
+
+//Stop game loop and show end screen (Part 6)
+function endGame(win) {
+    clearInterval(gameLoopId); //Stop the game loop
+
+    //Short delay to let last frame finish rendering
+    setTimeout(() => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (win) {
+            //Green text for victory
+            displayMessage(
+                "Victory! Press Enter to restart",
+                "green"
+            );
+        } else {
+            //Red text for defeat
+            displayMessage(
+                "You died! Press Enter to restart"
+            );
+        }
+    }, 200);
+}
+
+//Reset game state and start fresh (Part 6)
+function resetGame() {
+    if (gameLoopId) {
+        clearInterval(gameLoopId); //Stop current game loop
+        eventEmitter.clear();      //Remove all event listeners
+        initGame();                //Reinitialize game objects
+
+        //Start a new game loop
+        gameLoopId = setInterval(() => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "black";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            drawPoints();
+            drawLife();
+            updateGameObjects();
+            drawGameObjects(ctx);
+        }, 100);
+    }
+}
+
 //Game object creation (Part 3)
 //Creates 5x5 enemy formation and adds them to gameObjects array
 function createEnemies() {
@@ -320,13 +397,13 @@ function drawGameObjects(ctx) {
     gameObjects.forEach(go => go.draw(ctx));
 }
 
-//Init game (Part 3 & 4)
+//Init game (Part 3, 4, 5 & 6)
 function initGame() {
     gameObjects = []; //Reset game objects array
     createEnemies();  //Create and position all enemies
     createHero();     //Create and position the hero
 
-    //Key events and move hero accordingly
+    //Subscribe to key events and move hero accordingly
     eventEmitter.on(Messages.KEY_EVENT_UP, () => {
         hero.y -= 5; //Move up (decrease y)
     });
@@ -350,21 +427,49 @@ function initGame() {
         }
     });
 
+    //Enter key resets the game
+    eventEmitter.on(Messages.KEY_EVENT_ENTER, () => {
+        resetGame();
+    });
+
     //When laser hits enemy, mark both as dead and add points
+    //Also check if all enemies are destroyed for win condition
     eventEmitter.on(Messages.COLLISION_ENEMY_LASER, (_, { first, second }) => {
         first.dead = true;
         second.dead = true;
         hero.incrementPoints(); //Add 100 points
+
+        if (isEnemiesDead()) {
+            eventEmitter.emit(Messages.GAME_END_WIN); //Trigger win
+        }
     });
 
     //When enemy hits hero, enemy dies and hero loses a life
+    //Check loss condition first, then win condition
     eventEmitter.on(Messages.COLLISION_ENEMY_HERO, (_, { enemy }) => {
         enemy.dead = true;
         hero.decrementLife(); //Lose a life
+
+        if (isHeroDead()) {
+            eventEmitter.emit(Messages.GAME_END_LOSS); //Trigger loss
+            return; //Stop here, no need to check win
+        }
+        if (isEnemiesDead()) {
+            eventEmitter.emit(Messages.GAME_END_WIN); //Trigger win
+        }
+    });
+
+    //Trigger end game screens
+    eventEmitter.on(Messages.GAME_END_WIN, () => {
+        endGame(true); //Show victory screen
+    });
+
+    eventEmitter.on(Messages.GAME_END_LOSS, () => {
+        endGame(false); //Show defeat screen
     });
 }
 
-//Game loop (Part 3, 4 & 5)
+//Game loop (Part 3, 4, 5 & 6)
 //Wait for page to fully load before starting
 window.onload = async () => {
     //Get canvas element and 2D 
@@ -375,14 +480,14 @@ window.onload = async () => {
     heroImg = await loadTexture("assets/player.png");
     enemyImg = await loadTexture("assets/enemyShip.png");
     laserImg = await loadTexture("assets/laserRed.png");
-    lifeImg = await loadTexture("assets/life.png"); //Part 5
+    lifeImg = await loadTexture("assets/life.png");
 
     //Initialize game objects and event listeners
     initGame();
 
     //Game loop runs every 100ms
     //Clears canvas, updates collisions, redraws everything
-    const gameLoopId = setInterval(() => {
+    gameLoopId = setInterval(() => {
         ctx.clearRect(0, 0, canvas.width, canvas.height); //Clear old frame
         ctx.fillStyle = "black";
         ctx.fillRect(0, 0, canvas.width, canvas.height);  //Draw background
